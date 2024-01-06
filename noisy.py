@@ -39,17 +39,50 @@ class Crawler(object):
 
     def _request(self, url):
         """
-        Sends a POST/GET requests using a random user agent
+        Sends a GET request using a random user agent. Checks the size of the content before downloading.
         :param url: the url to visit
-        :return: the response Requests object
+        :return: the response Requests object or None if the content is too large
         """
         random_user_agent = random.choice(self._config["user_agents"])
         headers = {'user-agent': random_user_agent}
 
-        response = requests.get(url, headers=headers, timeout=5)
+        # Make a HEAD request to check the content length
+        try:
+            head_response = requests.head(url, headers=headers, timeout=5)
+            content_length = head_response.headers.get('Content-Length')
+            content_type = head_response.headers.get('Content-Type', '')
+            
+            # If the content is large, use streaming
+            should_stream = content_length and int(content_length) > 500 * 1024  # 500 KB limit     
+                   
+            #Avoid downloading files > 5000kB
+            if content_length and int(content_length) > 5000 * 1024:  # 5000 KB limit
+                logging.info(f"Skipping {url}, content size is larger than 5000 KB")
+                return None
 
-        return response
+            #Avoid downloading data files
+#            if not content_type.startswith('text/html'):
+#                logging.info(f"Skipping {url}, content type is not a web page")
+#                return None
 
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error during HEAD request to {url}: {e}")
+            return None
+
+        # Proceed with GET request if size is acceptable
+        try:
+            # Now make the GET request, with streaming if necessary
+            response = requests.get(url, headers=headers, timeout=5, stream=should_stream)
+            
+            if should_stream:
+                logging.info(f"Streaming content from {url}, size is larger than 500 KB")
+                # Handle streamed response here
+                # ...           
+                
+            return response
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error during GET request to {url}: {e}")
+            return None
     @staticmethod
     def _normalize_link(link, root_url):
         """
@@ -156,8 +189,16 @@ class Crawler(object):
 
         random_link = random.choice(self._links)
         try:
+            response = self._request(random_link)
+
+            # Check if response is None (e.g., content too large)
+            if response is None:
+                self._remove_and_blacklist(random_link)
+                return  # Skip further processing for this URL
+                
+            
             logging.info("Visiting {}".format(random_link))
-            sub_page = self._request(random_link).content
+            sub_page = response.content
             sub_links = self._extract_urls(sub_page, random_link)
 
             # sleep for a random amount of time
@@ -232,7 +273,14 @@ class Crawler(object):
         while True:
             url = random.choice(self._config["root_urls"])
             try:
-                body = self._request(url).content
+                response = self._request(url)
+
+                # Check if response is None
+                if response is None:
+                    logging.warn(f"Skipping {url} due to connection issues")
+                    continue  # Skip to the next URL in the loop
+
+                body = response.content
                 self._links = self._extract_urls(body, url)
                 logging.debug("found {} links".format(len(self._links)))
                 self._browse_from_links()
