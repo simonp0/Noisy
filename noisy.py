@@ -52,6 +52,10 @@ class Crawler(object):
             content_length = head_response.headers.get('Content-Length')
             content_type = head_response.headers.get('Content-Type', '')
             
+            if content_length is None:
+                logging.info(f"Skipping {url}, content-length header is missing")
+                return None
+            
             # If the content is large, use streaming
             should_stream = content_length and int(content_length) > 500 * 1024  # 500 KB limit     
                    
