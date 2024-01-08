@@ -52,10 +52,6 @@ class Crawler(object):
             content_length = head_response.headers.get('Content-Length')
             content_type = head_response.headers.get('Content-Type', '')
             
-            if content_length is None:
-                logging.info(f"Skipping {url}, content-length header is missing")
-                return None
-            
             # If the content is large, use streaming
             should_stream = content_length and int(content_length) > 500 * 1024  # 500 KB limit     
                    
@@ -69,6 +65,19 @@ class Crawler(object):
 #                logging.info(f"Skipping {url}, content type is not a web page")
 #                return None
 
+            # If content length is missing, use streaming to download a random amount of data
+            if content_length is None:
+                random_limit = random.randint(10, 70) * 1024  # Random limit between 10 KB and 70 KB
+                logging.info(f"Downloading up to {random_limit / 1024} KB from {url} as content-length header is missing")
+                response = requests.get(url, headers=headers, timeout=10, stream=True)
+                content = b''
+                for chunk in response.iter_content(1024):  # chunk size of 1 KB
+                    content += chunk
+                    if len(content) >= random_limit:
+                        break
+                response._content = content  # Replace response content with partial content
+                return response
+                
         except requests.exceptions.RequestException as e:
             logging.error(f"Error during HEAD request to {url}: {e}")
             return None
